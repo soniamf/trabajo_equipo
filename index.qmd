@@ -1,0 +1,23 @@
+---
+title: Trabajo Big Data 
+about:
+  template: solana    #- {jolla, solana, ...}
+  image-width: 10em     #- https://cybmeta.com/em-y-rem
+  image-shape: round    #- rectangle, round, rounded
+  links:
+    - icon: github
+      text: Github
+      href: https://github.com
+---
+
+Somos Paula Martínez, Sonia Monleón y Leire Montón
+
+Este es nuestro blog y vamos a presentar nuestro trabajo relacionado con el mercado laboral.
+
+Repo utilizado para elaborar el trabajo para la asignatura "Programación y manejo de datos en la era del Big Data" de la Universitat de València durante el curso 2022-2023. 
+
+La página web de la asignatura puede verse [aquí](https://perezp44.github.io/intro-ds-22-23-web/) 
+
+El repo del trabajo está [aquí](https://github.com/Soniamf)
+
+

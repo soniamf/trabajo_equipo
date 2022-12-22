@@ -1,0 +1,620 @@
+---
+title: "Evolución del mercado laboral en España"  #- título
+date: 2022-12-23 #- ISO8601 YYYY-MM-DD format 
+author: "Paula Martínez, Sonia Monleón, Leire Montón"
+format: 
+  revealjs:
+    scrollable: true
+    slide-level: 2
+    height: 900
+    width: 1600
+    toc: false
+    center-title-slide: true
+    title-slide-attributes: #- atributos para la slide de titulo
+      data-background-color: "#F469AC"   #- color de R-ladies
+    preview-links: auto  #- true: abre un iframe en lugar de abrir ventana
+    link-external-newwindow: true
+    transition: fade
+    fontcolor: "#F469AC"
+    highlight-style: a11y
+    code-line-numbers: true
+    number-sections: false
+    slide-number: c/t  
+    incremental: false   
+footer: |
+  Slides hechas con [Quarto](https://quarto.org/) 
+---
+
+## Índice
+
+1.  Introducción
+
+2.  Definiciones
+
+3.  Nivel nacional
+
+4.  Comunidad Valenciana
+
+5.  Nuestras provincias
+
+6.  Mapas
+
+7.  Conclusión
+
+-------------------
+
+## Introducción
+
+Nuestro trabajo se centra en analizar la evolución del desempleo y del empleo a nivel nacional ya que es un tema que está a la orden del día y desde nuestro punto de vista es interesante aprender y saber sobre ello. Los datos han sido obtenidos del INE.
+
+```{r, eval=TRUE, echo=FALSE, out.width="15%", fig.pos="right"}
+
+knitr::include_graphics( here :: here ("foto.jpg"))
+
+```
+
+-------------------
+
+## Definiciones
+
+
+-   TASA DE PARO (TASA DE DESEMPLEO): Es el cociente entre el número de parados y el de activos. El desempleo es la situación en la que se encuentra una persona en edad y capacidad de trabajar pero no tiene un trabajo remunerado o un empleo por cuenta propia.
+
+
+
+
+-   TASA DE ACTIVIDAD: Es el cociente entre el total de activos y la población mayor de 16 años (en edad de trabajar). Es decir, dicha tasa nos dice cuántas personas se encuentran en edad de trabajar y desean hacerlo.
+
+
+
+
+-   TASA DE OCUPACIÓN (TASA DE EMPLEO): proporción de personas ocupadas sobre el total de población de esas edades.
+
+------------------
+
+## Nivel nacional 
+
+### Tasa paro, actividad, empleo 
+
+Evolución de las tasas a nivel nacional de ambos sexos
+
+```{r, include = FALSE}
+
+
+#- Ultimos datos EPA:  https://www.ine.es/dyngs/INEbase/es/operacion.htm?c=Estadistica_C&cid=1254736176918&menu=ultiDatos&idp=1254735976595
+#- Hay muchas tablas. anuales, trimestrales, CCAA, provinciales etc ... etc ...
+
+library(tidyverse)
+library(sf)
+library(ggplot2)
+library(ggplotify)
+library(ggplotlyExtra)
+
+
+#- Tasas de actividad, paro y empleo por provincia y sexo: https://www.ine.es/jaxiT3/Tabla.htm?t=3996&L=0
+
+
+#- Descargamos la tabla del INE
+my_url <- "https://www.ine.es/jaxiT3/files/t/es/csv_bdsc/3996.csv?nocab=1"
+curl::curl_download(my_url, "./datos/epa_tab_sonia.csv")
+
+#- DETALLE: los datos q hemos descargados están en formato "csv" (PERO separados por ;)
+#- Importamos la tabla al Global
+df <- rio::import("./datos/epa_tab_sonia.csv") #- no los interpreta bien
+str(df)
+#- antes de hacer nada: los nombres de las variables tienen q estar bien (ser sintácticamente válidos)
+names(df) #- están bien pero ... aún así quiero recordar janitor::clean_names()
+df <- janitor::clean_names(df) 
+#- lo arreglamos
+df <- df %>% mutate(total = stringr::str_replace(total, "," , "." ))
+df <- df %>% mutate(total.n = as.numeric(total)) #- había pb en Melilla 2002T2
+str(df)
+df <- df %>% select(-total) %>% rename(total = total.n) #- quito lo q sobra
+str(df)
+
+
+
+#- Veamos q hay en df ----------------------------------------------------
+df_dicc <- pjpv.curso.R.2022::pjp_dicc(df)
+df_uniques <- pjpv.curso.R.2022::pjp_valores_unicos(df)
+names(df)
+rm(df_dicc, df_uniques)
+
+
+#- antes empezar hay que separar 2 columnas
+#- 1) la v. fecha está como texto ("2022T3") la pasamos a fecha y sacamos año y mes
+df <- df %>% 
+  mutate(fecha = lubridate::yq(periodo)) %>% 
+  mutate(anyo = lubridate::year(fecha)) %>% 
+  #mutate(mes = lubridate::month(fecha)) %>% #- el mes no tiene sentido (son trimestrales)
+  mutate(trimestre = lubridate::quarter(fecha))  %>% 
+  select(-periodo)   #- quito lo q no hace falta
+
+#- en provincias estan las 52 prov y el "Total nacional"
+#- arreglarlo
+df <- df %>% 
+  mutate(provincias = ifelse(provincias == "Total Nacional",
+                             paste("00", provincias),
+                             provincias))
+df <- df %>%  
+  tidyr::separate(provincias, sep = " ", 
+                  into = c("ine_prov", "ine_prov.n"), extra = "merge") 
+
+
+df_wide <- df %>% pivot_wider(names_from = tasas, values_from = total) 
+df_wide <- janitor::clean_names(df_wide)
+names(df_wide)
+df_wide <- df_wide %>% 
+  rename(tasa_actividad = tasa_de_actividad) %>% 
+  rename(tasa_paro = tasa_de_paro_de_la_poblacion) %>% 
+  rename(tasa_empleo = tasa_de_empleo_de_la_poblacion) 
+
+```
+
+```{r, echo = FALSE,message = FALSE, warning = FALSE}
+#tasa de paro 
+
+df_totnac <-  df_wide %>% filter(ine_prov_n == "Total Nacional") %>% filter(sexo == "Ambos sexos") %>% filter(trimestre == 4)
+
+p2_paro <- ggplot(data = df_totnac, 
+             aes(x = anyo, y = tasa_paro)) + geom_col(fill = "#82E0AA") + labs(title = "Evolución de la tasa de paro a nivel nacional",
+       caption = "Datos provenientes del INE",
+       x = "",
+       y = "Tasa de paro") + theme_light()
+
+p2_paro + geom_smooth(color = "black") 
+
+```
+
+--------- 
+
+```{r, echo = FALSE,message = FALSE, warning = FALSE}
+#tasa de actividad
+
+p2_actividad <- ggplot(data = df_totnac, 
+                  aes(x = anyo, y = tasa_actividad)) + geom_col(fill = "#EC7063") + labs(title = "Evolución de la tasa de actividad a nivel nacional", caption = "Datos provenientes del INE",x = "", y = "Tasa de actividad") + theme_light()
+
+p2_actividad + geom_smooth(color = "black")
+
+```
+
+----------
+
+```{r, echo = FALSE,message = FALSE, warning = FALSE}
+
+#tasa empleo 
+
+p2_empleo <- ggplot(data = df_totnac, 
+                  aes(x = anyo, y = tasa_empleo)) + geom_col(fill = "#BB8FCE") + labs(title = "Evolución de la tasa de empleo a nivel nacional", caption = "Datos provenientes del INE",x = "", y = "Tasa de empleo") + theme_light()
+
+p2_empleo + geom_smooth(color = "black")
+                      
+```
+
+---------
+
+### La Gran Recesión vs el COVID-19
+
+Comparación de la tasa de paro durante el covid y la crisis del 2008. ¿En cuál tuvo más impacto?
+
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+df_covid <- df_wide %>% filter(anyo %in% c(2018, 2019, 2020, 2021,2022)) %>% filter(ine_prov_n == "Total Nacional") %>% filter(sexo == "Ambos sexos")  %>% select(tasa_paro, anyo, trimestre)
+
+p6_covid <- ggplot(data = df_covid, aes(x = anyo, y = tasa_paro, color = trimestre)) + geom_line() + geom_point() +
+  labs(title = "Tasa de paro durante el COVID 19",
+       subtitle = "(por trimestre)",
+       caption = "Datos provenientes del INE",
+       x = "",
+       y = "Tasa de paro",
+       color = "Trimestre") + theme_classic() 
+
+plotly::ggplotly(p6_covid)
+
+
+df_2008 <- df_wide %>% filter(anyo %in% c(2007, 2008, 2009,2010, 2011, 2012, 2013, 2014)) %>% filter(ine_prov_n == "Total Nacional") %>% filter(sexo == "Ambos sexos") %>% select(tasa_paro, anyo, trimestre)
+
+p6_2008 <- ggplot(data = df_2008, aes(x = anyo, y = tasa_paro, color = trimestre)) + geom_line() + geom_point() +
+  labs(title = "Tasa de paro durante la Gran Recesión",
+       subtitle = "(por trimestre)",
+       caption = "Datos provenientes del INE",
+       x = "",
+       y = "Tasa de paro",
+       color = "Trimestre") + theme_classic()
+
+plotly::ggplotly(p6_2008)
+
+```
+
+---------- 
+
+### Tasas según provincias 
+
+¿Qué provincia tuvo un mayor paro en 2020 (año del covid)? ¿ Y un mayor empleo?
+
+
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+library(gt)
+
+top_1_paro <- df_wide %>% filter(anyo == 2020) %>% 
+  filter(sexo == "Ambos sexos") %>% top_n(1, tasa_paro) %>% group_by(ine_prov_n) %>% select(ine_prov_n, anyo, trimestre, tasa_paro) %>% 
+  ungroup()
+
+
+img_locales <- c("./imagenes/bandera_Jaen.png")
+
+df_img <- cbind(top_1_paro, img_locales)  
+tt_img <- df_img %>% gt() 
+tt_img %>% 
+  gt::text_transform(locations = cells_body(columns = c(img_locales)), 
+                     fn = function(x){gt::local_image(x, height = 30)}) %>% 
+  tab_header(title = "Provincia con mayor paro en 2020") %>% cols_label(anyo = "Año", trimestre = "Trimestre", tasa_paro = "Tasa de paro", ine_prov_n = "Provincia", img_locales = "") %>% 
+  opt_table_font(font = google_font("Fira Mono")) %>% 
+  tab_options(column_labels.border.bottom.color = "black",
+              table_body.border.bottom.color = "black",
+              table_body.hlines.color = "white") 
+              
+
+#Provincia con mayor empleo en 2020 
+
+top_1_empleo <- df_wide %>% filter(anyo == 2020) %>%
+  filter(sexo == "Ambos sexos") %>% top_n(1, tasa_empleo) %>% group_by(ine_prov_n)  %>% select(ine_prov_n, anyo, trimestre, tasa_empleo) %>% ungroup()
+
+img_locales2 <- c("./imagenes/bandera_Lleida.png")
+
+df_img2 <- cbind(top_1_empleo, img_locales2) 
+tt_img2 <- df_img2 %>% gt() 
+tt_img2 %>% 
+  gt::text_transform(locations = cells_body(columns = c(img_locales2)),fn = function(x){gt::local_image(x, height = 30)}) %>% 
+  tab_header(title = "Provincia con mayor empleo en 2020") %>% cols_label(anyo = "Año", trimestre = "Trimestre", tasa_empleo = "Tasa de empleo", ine_prov_n = "Provincia", img_locales2 = "") %>%
+  opt_table_font(font = google_font("Fira Mono")) %>% 
+  tab_options(column_labels.border.bottom.color = "black",
+              table_body.border.bottom.color = "black",
+              table_body.hlines.color = "white")
+
+```
+
+-----------
+
+### Brecha de género
+
+¿Existe una brecha de género en la actualidad en cuanto al empleo?
+
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+df_3 <- df_wide  %>% 
+  filter(sexo != "Ambos sexos") %>% filter(ine_prov_n == "Total Nacional") %>% filter(trimestre == 1) %>% select(tasa_empleo, sexo, ine_prov_n, anyo)
+
+p3 <- ggplot(data = df_3, aes(x = anyo, y = tasa_empleo, color = sexo)) +
+  geom_line(linewidth = 1.5) +
+  geom_label(data = df_3, aes(x = anyo, y = tasa_empleo, label = 
+                                tasa_empleo)) +
+  labs(title = "Brecha de género en cuanto a empleo", caption = "Datos 
+provenientes del INE",x = "", y = "Tasa de empleo")+
+  scale_color_manual(values = c("purple", "green"), name = NULL) + 
+  theme(legend.position = "none") +
+  annotate(geom = "text", x = 2024, y = 56.2, label ="Hombres", color = 
+             "black", size = 4) +
+  annotate(geom = "text", x = 2024, y = 45.5, label ="Mujeres", color = 
+             "black", size = 4)+ theme_classic() +
+  theme(legend.position = "none")
+
+p3
+
+```
+
+---------
+
+## Comunidad Valenciana
+
+### Tasa de paro 
+
+Analizar la evolución del paro en el último trimestre desde 2002 hasta 2021 en la Comunidad Valencia (por provincias) para ambos sexos
+
+```{r, echo=FALSE, message = FALSE, warning = FALSE}
+Preg_0 <- df_wide  %>% filter(ine_prov_n %in% c("Valencia/València", "Alicante/Alacant", "Castellón/Castelló")) %>% select(tasa_paro, anyo, ine_prov_n, trimestre) %>% 
+  filter(trimestre == 4)
+
+p0 <- ggplot(data = Preg_0, 
+             aes(x = anyo, y = tasa_paro)) + geom_col(fill = "#E31B88") 
+
+
+p0 <- p0 + facet_grid(rows = vars(ine_prov_n)) +
+  labs(title = "Evolución del paro en la Comunidad Valenciana",
+       subtitle = "(último trimestre de cada año)",
+       caption = "Datos provenientes del INE",
+       x = "",
+       y = "Tasa de paro") + theme_classic() 
+
+plotly::ggplotly(p0)
+
+```
+
+---------
+
+Tasa de paro según mujeres y hombres durante los 4 trimestres del 2020 en Valencia
+
+```{r, echo=FALSE, message = FALSE, warning = FALSE}
+df_trimestre_1 <- df_wide %>% filter(sexo %in% c("Hombres", "Mujeres")) %>% filter(ine_prov_n == "Valencia/València") %>% filter(anyo == 2020) %>% select(tasa_paro,trimestre, sexo, anyo)%>% filter(trimestre == 1)
+
+primer_trimestre <- ggplot(df_trimestre_1, aes("", tasa_paro, fill = sexo)) + geom_bar(stat = "identity", color="white") +
+  coord_polar(theta = "y") +  
+  theme_void() +  
+  scale_fill_manual(values=c("orchid1","olivedrab1")) + geom_text(aes(label = tasa_paro),  position = position_stack(vjust = 0.5), color = "black", size = 2.5) + 
+  labs(subtitle = "Primer trimestre") + 
+  theme(plot.subtitle = element_text(hjust = 0.5)) + 
+  theme(legend.position = "none") 
+
+
+
+
+df_trimestre_2 <- df_wide %>% filter(sexo %in% c("Hombres", "Mujeres")) %>% filter(ine_prov_n == "Valencia/València") %>% filter(anyo == 2020) %>% select(tasa_paro,trimestre, sexo, anyo)%>% filter(trimestre == 2)
+
+segundo_trimestre <- ggplot(df_trimestre_2, aes("", tasa_paro, fill = sexo)) + geom_bar(stat = "identity", color="white") +
+  coord_polar(theta = "y") +  
+  theme_void() +  
+  scale_fill_manual(values=c("orchid1","olivedrab1")) + geom_text(aes(label = tasa_paro),  position = position_stack(vjust = 0.5), color = "black", size = 2.5) + 
+  labs(subtitle = "Segundo trimestre") + 
+  theme(plot.subtitle = element_text(hjust = 0.5)) + 
+  theme(legend.position = "none") 
+
+
+
+df_trimestre_3 <- df_wide %>% filter(sexo %in% c("Hombres", "Mujeres")) %>% filter(ine_prov_n == "Valencia/València") %>% filter(anyo == 2020) %>% select(tasa_paro,trimestre, sexo, anyo)%>% filter(trimestre == 3)
+
+tercer_trimestre <- ggplot(df_trimestre_3, aes("", tasa_paro, fill = sexo)) + geom_bar(stat = "identity", color="white") +
+  coord_polar(theta = "y") +  
+  theme_void() +  
+  scale_fill_manual(values=c("orchid1","olivedrab1")) + geom_text(aes(label = tasa_paro),  position = position_stack(vjust = 0.5), color = "black", size = 2.5) + 
+  labs(subtitle = "Tercer trimestre") + 
+  theme(plot.subtitle = element_text(hjust = 0.5)) + 
+  theme(legend.position = "none") 
+
+
+
+df_trimestre_4 <- df_wide %>% filter(sexo %in% c("Hombres", "Mujeres")) %>% filter(ine_prov_n == "Valencia/València") %>% filter(anyo == 2020) %>% select(tasa_paro,trimestre, sexo, anyo)%>% filter(trimestre == 4)
+
+cuarto_trimestre <- ggplot(df_trimestre_4, aes("", tasa_paro, fill = sexo)) + geom_bar(stat = "identity", color="white") +
+  coord_polar(theta = "y") +  
+  theme_void() +  
+  scale_fill_manual(values=c("orchid1","olivedrab1")) + geom_text(aes(label = tasa_paro),  position = position_stack(vjust = 0.5), color = "black", size = 2.5) + 
+  labs(subtitle = "Cuarto trimestre") + 
+  theme(plot.subtitle = element_text(hjust = 0.5)) + 
+  theme(legend.position = "none") 
+
+
+library(patchwork)
+
+p1 <- (primer_trimestre + segundo_trimestre) / (tercer_trimestre + cuarto_trimestre) + labs(title = "tasa de paro durante los 4 trimestres del 2020", color = "sexo") + theme(legend.position = "left") 
+p1 
+
+```
+
+---------
+
+### Estacionalidad 
+
+::: {.panel-tabset}
+
+
+### Primer Trimestre
+
+```{r, echo=FALSE, message = FALSE, warning = FALSE}
+
+estac_t1 <- df_wide  %>% filter(ine_prov_n %in% c("Valencia/València", "Alicante/Alacant", "Castellón/Castelló"))%>% filter(trimestre == 1) %>% filter(sexo == "Ambos sexos") %>% select(tasa_empleo, anyo, ine_prov_n) 
+
+tt_1 <- estac_t1 %>% gt()
+tt_1 <- gt::gt(estac_t1)
+tt_1 %>% 
+  tab_header(title = "Estacionalidad Comunidad Valenciana", subtitle = md ("**primer trimestre**")) %>% cols_label(tasa_empleo = "Tasa de empleo",  anyo = "Año", ine_prov_n = "Provincia") %>% cols_move(columns = c(tasa_empleo, anyo), after = c(ine_prov_n))  %>% 
+  fmt_number(columns = c(tasa_empleo),
+             decimals = 2, 
+             sep_mark = ".", 
+             dec_mark = ",")  %>% 
+  summary_rows(columns = c(tasa_empleo),
+               fns = list(Media = ~ mean(., na.rm = TRUE))) %>% opt_stylize(style = 1, color = "red")
+```
+
+
+### Segundo Trimestre 
+
+```{r, echo=FALSE, message = FALSE, warning = FALSE}
+
+estac_t2 <- df_wide  %>% filter(ine_prov_n %in% c("Valencia/València", "Alicante/Alacant", "Castellón/Castelló"))%>% filter(trimestre == 2) %>% filter(sexo == "Ambos sexos") %>% select(tasa_empleo, anyo, ine_prov_n) 
+
+tt_2 <- estac_t2 %>% gt()
+tt_2 <- gt::gt(estac_t2)
+tt_2 %>% 
+  tab_header(title = "Estacionalidad Comunidad Valenciana", subtitle = md ("**segundo trimestre**")) %>% cols_label(tasa_empleo = "Tasa de empleo",  anyo = "Año", ine_prov_n = "Provincia") %>% cols_move(columns = c(tasa_empleo, anyo), after = c(ine_prov_n))%>% 
+  fmt_number(columns = c(tasa_empleo),
+             decimals = 2, 
+             sep_mark = ".", 
+             dec_mark = ",")%>% 
+  summary_rows(columns = c(tasa_empleo),
+               fns = list(Media = ~ mean(., na.rm = TRUE))) %>% opt_stylize(style = 1, color = "green")
+
+
+```
+
+### Tercer Trimestre 
+
+```{r, echo=FALSE, message = FALSE, warning = FALSE}
+
+estac_t3 <- df_wide  %>% filter(ine_prov_n %in% c("Valencia/València", "Alicante/Alacant", "Castellón/Castelló"))%>% filter(trimestre == 3) %>% filter(sexo == "Ambos sexos") %>% select(tasa_empleo, anyo, ine_prov_n) 
+
+tt_3 <- estac_t3 %>% gt()
+tt_3 <- gt::gt(estac_t3)
+tt_3 %>% 
+  tab_header(title = "Estacionalidad Comunidad Valenciana", subtitle = md ("**tercer trimestre**")) %>% cols_label(tasa_empleo = "Tasa de empleo",  anyo = "Año", ine_prov_n = "Provincia") %>% cols_move(columns = c(tasa_empleo, anyo), after = c(ine_prov_n)) %>% 
+  fmt_number(columns = c(tasa_empleo),
+             decimals = 2, 
+             sep_mark = ".", 
+             dec_mark = ",") %>% 
+  summary_rows(columns = c(tasa_empleo),
+               fns = list(Media = ~ mean(., na.rm = TRUE))) %>% opt_stylize(style = 1, color = "pink")
+
+
+```
+
+### Cuarto trimestre 
+
+```{r, echo=FALSE, message = FALSE, warning = FALSE}
+
+estac_t4 <- df_wide  %>% filter(ine_prov_n %in% c("Valencia/València", "Alicante/Alacant", "Castellón/Castelló"))%>% filter(trimestre == 4) %>% filter(sexo == "Ambos sexos") %>% select(tasa_empleo, anyo, ine_prov_n) 
+
+tt_4 <- estac_t4 %>% gt()
+tt_4 <- gt::gt(estac_t4)
+tt_4 %>% 
+  tab_header(title = "Estacionalidad Comunidad Valenciana", subtitle = md ("**cuarto trimestre**")) %>% cols_label(tasa_empleo = "Tasa de empleo",  anyo = "Año", ine_prov_n = "Provincia") %>% cols_move(columns = c(tasa_empleo, anyo), after = c(ine_prov_n))  %>% 
+  fmt_number(columns = c(tasa_empleo),
+             decimals = 2, 
+             sep_mark = ".", 
+             dec_mark = ",") %>% 
+  summary_rows(columns = c(tasa_empleo),
+               fns = list(Media = ~ mean(., na.rm = TRUE))) %>% opt_stylize(style = 1, color = "cyan")
+
+  
+```
+:::
+
+----------
+
+## Nuestras provincias 
+
+Ya que cada integrante del grupo pertenece a una provincia hemos decidido buscar cuál ha sido el año en el que más actividad ha habido en cada una de nuestras provincias.
+
+```{r, echo=FALSE, message = FALSE, warning = FALSE}
+#Teruel 
+
+teruel <- df_wide %>% filter(ine_prov_n == "Teruel") %>% 
+  filter(sexo == "Ambos sexos") %>% top_n(1, tasa_actividad) %>% group_by(anyo) %>% select(anyo, trimestre, tasa_actividad) %>% ungroup()
+
+img_locales3 <- c("./imagenes/bandera_ter.png")
+
+df_img3 <- cbind(teruel, img_locales3) 
+tt_img3 <- df_img3 %>% gt() 
+tt_img3 %>% 
+  gt::text_transform(locations = cells_body(columns = c(img_locales3)), 
+                     fn = function(x){gt::local_image(x, height = 30)}) %>% 
+  tab_header(title = "Año con mayor Tasa de Actividad", subtitle = md ("**Teruel**")) %>% cols_label(anyo = "Año", trimestre = "Trimestre", tasa_actividad = "Tasa de actividad", img_locales3 = "") %>%
+  opt_table_font(font = google_font("Fira Mono")) %>% 
+  tab_options(column_labels.border.bottom.color = "black",
+              table_body.border.bottom.color = "black",
+              table_body.hlines.color = "white")
+
+#Logroño 
+
+La_Rioja <- df_wide %>% filter(ine_prov_n == "Rioja, La") %>% 
+  filter(sexo == "Ambos sexos") %>% top_n(1, tasa_actividad) %>% group_by(anyo) %>% select(anyo, trimestre, tasa_actividad) %>% ungroup()
+
+img_locales4 <- c("./imagenes/bandera_rioja.png")
+
+df_img4 <- cbind(La_Rioja, img_locales4) 
+tt_img4 <- df_img4 %>% gt() 
+tt_img4 %>% 
+  gt::text_transform(locations = cells_body(columns = c(img_locales4)), 
+                     fn = function(x){gt::local_image(x, height = 30)}) %>% 
+  tab_header(title = "Año con mayor Tasa de Actividad", subtitle = md ("**La Rioja**")) %>% cols_label(anyo = "Año", trimestre = "Trimestre", tasa_actividad = "Tasa de actividad", img_locales4 = "") %>%
+  opt_table_font(font = google_font("Fira Mono")) %>% 
+  tab_options(column_labels.border.bottom.color = "black",
+              table_body.border.bottom.color = "black",
+              table_body.hlines.color = "white")
+
+
+#Valencia 
+
+Valencia <- df_wide %>% filter(ine_prov_n == "Valencia/València") %>%
+  filter(sexo == "Ambos sexos") %>% top_n(1, tasa_actividad) %>% group_by(anyo) %>% select(anyo, trimestre, tasa_actividad) %>% ungroup()
+
+img_locales5 <- c("./imagenes/bandera_Vlc.png")
+
+df_img5 <- cbind(Valencia, img_locales5) 
+tt_img5 <- df_img5 %>% gt() 
+tt_img5 %>% 
+  gt::text_transform(locations = cells_body(columns = c(img_locales5)), 
+                     fn = function(x){gt::local_image(x, height = 30)}) %>% 
+  tab_header(title = "Año con mayor Tasa de Actividad", subtitle = md ("**Valencia**")) %>% cols_label(anyo = "Año", trimestre = "Trimestre", tasa_actividad = "Tasa de actividad", img_locales5 = "") %>%
+  opt_table_font(font = google_font("Fira Mono")) %>% 
+  tab_options(column_labels.border.bottom.color = "black",
+              table_body.border.bottom.color = "black",
+              table_body.hlines.color = "white")
+
+```
+
+---------
+
+## Mapas 
+
+### Tasa de paro 
+
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+#- cargo geometrías de provincias
+df_geo_prov <- pjpv.curso.R.2022::LAU2_prov_2020_canarias
+
+
+#- me quedo con las vv. q me interesan
+df_geo_prov <- df_geo_prov %>% select(ine_prov, ine_prov.n)
+
+
+
+#creo un nuevo df con los datos que quiero
+
+df_new <- df_wide %>% filter(sexo == "Ambos sexos") %>% filter(anyo == 2022) %>% filter(trimestre == 3) %>%  filter(ine_prov_n!= "Total Nacional") %>% select(anyo, ine_prov, ine_prov_n, tasa_paro )
+
+#- junto geometría (df_geo_prov) con datos INE (df_new)
+#- las geometrías a la izquierda
+df_ok <- left_join(df_geo_prov, df_new, by = c("ine_prov" = "ine_prov"))
+
+
+p <- ggplot() + 
+  geom_sf(data = df_ok, 
+          aes(geometry = geometry, fill = tasa_paro), 
+          color = "white", size = 0.09) 
+
+
+
+#- luego ya hay que tunearlo 
+p + scale_fill_distiller(palette = 11, name = NULL) +
+  labs(title = "Tasa de paro en 2022 según Provincias " , caption = "Datos provenientes del INE") + theme_void()
+
+```
+
+-----------
+
+### Tasa de empleo 
+
+```{r, echo=FALSE, message = FALSE, warning = FALSE}
+#mapa empleo 2022
+
+#creo un nuevo df con los datos que quiero
+
+df_new_2 <- df_wide %>% filter(sexo == "Ambos sexos") %>% filter(anyo == 2022) %>% filter(trimestre == 3) %>%  filter(ine_prov_n!= "Total Nacional") %>% select(anyo, ine_prov, ine_prov_n, tasa_empleo )
+
+#- junto geometría (df_geo_prov) con datos INE (df_new_2)
+#- las geometrías a la izquierda
+df_ok_2 <- left_join(df_geo_prov, df_new_2, by = c("ine_prov" = "ine_prov"))
+
+
+p <- ggplot() + 
+  geom_sf(data = df_ok_2, 
+          aes(geometry = geometry, fill = tasa_empleo), 
+          color = "white", size = 0.09) 
+
+
+#- luego ya hay que tunearlo (un poco)
+
+p + scale_fill_distiller(palette = 3, name = NULL) +
+  labs(title = "Tasa de empleo en 2022 según Provincias " , caption = "Datos provenientes del INE") + theme_void()
+
+```
+
+-----------
+
+## Conclusión
+
+El análisis del empleo es uno de los indicadores de mayor importancia sobre el desarrollo de la economía de un país, por lo tanto el gobierno de España debe dar prioridad a políticas activas de empleo porque aumentarán el bienestar del conjunto de la economía española.
+
+```{r, eval=TRUE, echo=FALSE, out.width="15%", fig.pos="right"}
+
+knitr::include_graphics( here :: here ("gracias.png"))
+
+```
+
